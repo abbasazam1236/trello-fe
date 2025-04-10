@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { useParams } from "react-router-dom";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  DropResult,
+} from "@hello-pangea/dnd";
+
 
 interface ListItem {
   id: number;
@@ -10,6 +17,7 @@ interface CardItem {
   id: number;
   card_name: string;
   listId: number;
+  completed: boolean;
 }
 
 const List = () => {
@@ -26,6 +34,21 @@ const List = () => {
       fetchLists();
     }
   }, [boardId]);
+
+  const handleToggleCompleted = async (
+    cardId: number,
+    currentStatus: boolean,
+    listId: number
+  ) => {
+    try {
+      await axios.patch(`http://localhost:3000/card/${cardId}`, {
+        completed: !currentStatus,
+      });
+      fetchCards(listId); // Refresh after toggle
+    } catch (error) {
+      console.error("❌ Error updating completed status:", error);
+    }
+  };
 
   const fetchLists = async () => {
     try {
@@ -100,6 +123,39 @@ const List = () => {
     }
   };
 
+  const onDragEnd = async (result: DropResult) => {
+    const { destination, source, draggableId } = result;
+  
+    // if dropped outside
+    if (!destination) return;
+  
+    // if dropped in same place
+    if (
+      destination.droppableId === source.droppableId &&
+      destination.index === source.index
+    ) {
+      return;
+    }
+  
+    const sourceListId = +source.droppableId;
+    const destListId = +destination.droppableId;
+    const movedCardId = +draggableId;
+  
+    try {
+      // 🔁 Update backend
+      await axios.patch(`http://localhost:3000/card/move/${movedCardId}`, {
+        listId: destListId,
+      });
+  
+      // 🧠 Refresh both source & destination cards
+      fetchCards(sourceListId);
+      fetchCards(destListId);
+    } catch (error) {
+      console.error("❌ Error moving card:", error);
+    }
+  };
+  
+
   return (
     <div className="relative h-screen bg-gray-100 p-8">
       <button
@@ -130,10 +186,17 @@ const List = () => {
         </div>
       )}
 
-      <div className="mt-16 grid grid-cols-3 gap-4">
-        {lists.length > 0 ? (
-          lists.map((list) => (
-            <div key={list.id} className="bg-white p-4 rounded-lg shadow-md">
+<DragDropContext onDragEnd={onDragEnd}>
+  <div className="mt-16 grid grid-cols-3 gap-4">
+    {lists.length > 0 ? (
+      lists.map((list) => (
+        <Droppable droppableId={String(list.id)} key={list.id}>
+          {(provided) => (
+            <div
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+              className="bg-white p-4 rounded-lg shadow-md"
+            >
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold text-gray-800">
                   {list.list_name}
@@ -150,17 +213,43 @@ const List = () => {
                 </button>
               </div>
 
-              {/* Show cards */}
-              {cards[list.id]?.map((card) => (
-                <div
+              {/* Card list (Draggables) */}
+              {cards[list.id]?.map((card, index) => (
+                <Draggable
+                  draggableId={String(card.id)}
+                  index={index}
                   key={card.id}
-                  className="mt-2 p-2 bg-gray-100 rounded shadow-sm text-gray-800"
                 >
-                  {card.card_name}
-                </div>
+                  {(provided) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.draggableProps}
+                      {...provided.dragHandleProps}
+                      className="mt-2 p-2 bg-gray-100 rounded shadow-sm text-gray-800 flex items-center group"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={card.completed}
+                        onChange={() =>
+                          handleToggleCompleted(card.id, card.completed, list.id)
+                        }
+                        className={`mr-2 w-4 h-4 transition-opacity duration-200 cursor-pointer ${
+                          card.completed
+                            ? "opacity-100"
+                            : "opacity-0 group-hover:opacity-100"
+                        }`}
+                      />
+                      <span className={card.completed ? "text-gray-500" : ""}>
+                        {card.card_name}
+                      </span>
+                    </div>
+                  )}
+                </Draggable>
               ))}
 
-              {/* Show input only when this list is open */}
+              {provided.placeholder}
+
+              {/* Add card input */}
               {openCardListId === list.id && (
                 <div className="mt-3">
                   <input
@@ -181,11 +270,15 @@ const List = () => {
                 </div>
               )}
             </div>
-          ))
-        ) : (
-          <p className="text-gray-500">No lists found for this board.</p>
-        )}
-      </div>
+          )}
+        </Droppable>
+      ))
+    ) : (
+      <p className="text-gray-500">No lists found for this board.</p>
+    )}
+  </div>
+</DragDropContext>
+
     </div>
   );
 };
